@@ -18,8 +18,7 @@ source.include_exts = py,png,jpg,kv,atlas
 # (str) Application versioning
 version = 1.0
 
-# (list) Application requirements
-requirements = python3,kivy,plyer,jnius,requests,urllib3
+requirements = python3,kivy,plyer,pyjnius,requests,urllib3
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
 # requirements.source.kivy = ../../kivy
