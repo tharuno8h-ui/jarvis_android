@@ -19,9 +19,7 @@ source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
 # (list) Application requirements
-# comma separated e.g. requirements = sqlite3,kivy
-requirements = python3==3.10.13,hostpython3==3.10.13,kivy==2.2.1,plyer,pyjnius,requests,urllib3
-
+requirements = python3,kivy,plyer,jnius,requests,urllib3
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
 # requirements.source.kivy = ../../kivy
@@ -218,9 +216,7 @@ android.accept_sdk_license = True
 # (bool) Copy library instead of making a libpymodules.so
 #android.copy_libs = 1
 
-# (list) The Android archs to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
-android.archs = arm64-v8a, armeabi-v7a
-
+android.archs = arm64-v8a
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing
 # android.numeric_version = 1
