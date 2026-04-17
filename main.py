@@ -33,20 +33,13 @@ if platform == 'android':
     RecognizerIntent = autoclass('android.speech.RecognizerIntent')
     Intent = autoclass('android.content.Intent')
 
-    # Native Android TTS
-    class TTSListener(PythonJavaClass):
-        __javainterfaces__ = ['android/speech/tts/TextToSpeech$OnInitListener']
-        def onInit(self, status):
-            if status == TextToSpeech.SUCCESS:
-                global tts_instance
-                tts_instance.setLanguage(Locale.US)
-
-    tts_listener = TTSListener()
-    tts_instance = TextToSpeech(PythonActivity.mActivity, tts_listener)
-
+    # Native Android TTS using Plyer (Much more reliable across Android OS versions)
+    from plyer import tts
     def speak_text(text):
-        if tts_instance:
-            tts_instance.speak(text, TextToSpeech.QUEUE_FLUSH, None, None)
+        try:
+            tts.speak(text)
+        except Exception as e:
+            pass
 
     # Native Android STT
     speech_text = None
@@ -101,9 +94,14 @@ if platform == 'android':
 
         @run_on_ui_thread
         def start_recognition():
-            if not hasattr(get_user_speech, 'recognizer'):
-                get_user_speech.recognizer = SpeechRecognizer.createSpeechRecognizer(PythonActivity.mActivity)
-                get_user_speech.recognizer.setRecognitionListener(speech_listener)
+            if hasattr(get_user_speech, 'recognizer') and get_user_speech.recognizer:
+                try:
+                    get_user_speech.recognizer.destroy()
+                except Exception:
+                    pass
+            
+            get_user_speech.recognizer = SpeechRecognizer.createSpeechRecognizer(PythonActivity.mActivity)
+            get_user_speech.recognizer.setRecognitionListener(speech_listener)
             
             intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -111,7 +109,7 @@ if platform == 'android':
             get_user_speech.recognizer.startListening(intent)
 
         start_recognition()
-        speech_event.wait() # Blocking wait to keep the AI Loop synchronous
+        speech_event.wait(timeout=10) # 10 second timeout to prevent infinite stuck loop
         return speech_text if speech_text else ""
 
 else:
