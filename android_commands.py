@@ -24,6 +24,10 @@ if platform == 'android':
     Uri = autoclass('android.net.Uri')
     String = autoclass('java.lang.String')
     PackageManager = autoclass('android.content.pm.PackageManager')
+    Context = autoclass('android.content.Context')
+    Settings = autoclass('android.provider.Settings')
+    AlarmClock = autoclass('android.provider.AlarmClock')
+    MediaStore = autoclass('android.provider.MediaStore')
     
     def get_context():
         return PythonActivity.mActivity
@@ -178,18 +182,34 @@ def process_command(command):
         return f"[Desktop] Navigating to {place}."
 
     # 🌐 INTERNET & WIFI CONTROLS
-    if any(cmd in command for cmd in ["turn on internet", "enable mobile data", "turn on wifi", "enable wifi"]):
-        return "Activating network interfaces."
-    if any(cmd in command for cmd in ["turn off internet", "disable mobile data", "turn off wifi", "disable wifi"]):
-        return "Deactivating network interfaces."
+    if any(cmd in command for cmd in ["turn on internet", "enable mobile data", "turn on wifi", "enable wifi", "open wifi settings"]):
+        if platform == 'android':
+            try:
+                context = get_context()
+                intent = Intent(Settings.ACTION_WIFI_SETTINGS)
+                context.startActivity(intent)
+                return "Opening WiFi Settings. Direct background toggling is restricted on Android 10+."
+            except: pass
+        return "Opening network settings."
+        
     if "airplane mode" in command:
+        if platform == 'android':
+            try:
+                intent = Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
+                get_context().startActivity(intent)
+                return "Opening Airplane Mode settings."
+            except: pass
         return "Toggling Airplane mode."
 
     # 🔵 BLUETOOTH COMMANDS
-    if any(cmd in command for cmd in ["turn on bluetooth", "enable bluetooth"]):
-        return "Activating Bluetooth."
-    if any(cmd in command for cmd in ["turn off bluetooth", "disable bluetooth"]):
-        return "Deactivating Bluetooth."
+    if any(cmd in command for cmd in ["turn on bluetooth", "enable bluetooth", "open bluetooth settings"]):
+        if platform == 'android':
+            try:
+                intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                get_context().startActivity(intent)
+                return "Opening Bluetooth Settings."
+            except: pass
+        return "Opening Bluetooth Settings."
 
     # 🔊 VOLUME CONTROLS
     if any(cmd in command for cmd in ["increase volume", "volume up"]):
@@ -221,14 +241,57 @@ def process_command(command):
     # ⏰ TIME & REMINDERS
     if command.startswith("set alarm "):
         time_text = command.replace("set alarm ", "").strip()
+        if platform == 'android':
+            try:
+                intent = Intent(AlarmClock.ACTION_SET_ALARM)
+                intent.putExtra(AlarmClock.EXTRA_MESSAGE, "JARVIS Alarm")
+                intent.putExtra(AlarmClock.EXTRA_SKIP_UI, False)
+                get_context().startActivity(intent)
+                return f"Opening alarm application to set your alarm."
+            except: pass
         return f"Alarm successfully configured for {time_text}."
+        
+    if command.startswith("set timer for "):
+        if platform == 'android':
+            try:
+                minutes = int(''.join(filter(str.isdigit, command)))
+                intent = Intent(AlarmClock.ACTION_SET_TIMER)
+                intent.putExtra(AlarmClock.EXTRA_LENGTH, minutes * 60)
+                intent.putExtra(AlarmClock.EXTRA_MESSAGE, "JARVIS Timer")
+                intent.putExtra(AlarmClock.EXTRA_SKIP_UI, False)
+                get_context().startActivity(intent)
+                return f"Timer starting for {minutes} minutes."
+            except: return "Could not parse the timer duration."
+        return "Timer started."
+        
     if command.startswith("set reminder "):
         note = command.replace("set reminder ", "").strip()
         return f"Reminder actively set for {note}."
-    if "show time" in command or "what time" in command:
+        
+    if "show time" in command or "what time" in command or "current time" in command:
         return f"The current time is {datetime.now().strftime('%I:%M %p')}."
-    if "show date" in command or "what date" in command:
+        
+    if "show date" in command or "what date" in command or "today's date" in command:
         return f"Today's date is {datetime.now().strftime('%d %B %Y')}."
+
+    # 📷 CAMERA CONTROLS
+    if any(cmd in command for cmd in ["take a picture", "open camera"]):
+        if platform == 'android':
+            try:
+                intent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                get_context().startActivity(intent)
+                return "Opening camera view finder."
+            except: pass
+        return "Opening camera."
+        
+    if any(cmd in command for cmd in ["record a video", "open video camera"]):
+        if platform == 'android':
+            try:
+                intent = Intent(MediaStore.INTENT_ACTION_VIDEO_CAMERA)
+                get_context().startActivity(intent)
+                return "Opening video camera."
+            except: pass
+        return "Opening video camera."
 
     # 🤖 FALLBACK TO GEMINI
     if requests and GEMINI_API_KEY:
