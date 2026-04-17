@@ -21,35 +21,106 @@ from kivy.utils import platform
 # Import logic from command handling
 from android_commands import process_command
 
-# Polyfill for Voice (Text to Speech)
+# Pyjnius imports for Android
 if platform == 'android':
-    from plyer import tts
+    from jnius import autoclass, PythonJavaClass, java_method
+    from android.runnable import run_on_ui_thread
+
+    Locale = autoclass('java.util.Locale')
+    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+    TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
+    SpeechRecognizer = autoclass('android.speech.SpeechRecognizer')
+    RecognizerIntent = autoclass('android.speech.RecognizerIntent')
+    Intent = autoclass('android.content.Intent')
+
+    # Native Android TTS
+    class TTSListener(PythonJavaClass):
+        __javainterfaces__ = ['android/speech/tts/TextToSpeech$OnInitListener']
+        def onInit(self, status):
+            if status == TextToSpeech.SUCCESS:
+                global tts_instance
+                tts_instance.setLanguage(Locale.US)
+
+    tts_listener = TTSListener()
+    tts_instance = TextToSpeech(PythonActivity.mActivity, tts_listener)
+
     def speak_text(text):
-        try:
-            tts.speak(text)
-        except Exception as e:
-            pass
+        if tts_instance:
+            tts_instance.speak(text, TextToSpeech.QUEUE_FLUSH, None, None)
+
+    # Native Android STT
+    speech_text = None
+    speech_event = threading.Event()
+
+    class SpeechListener(PythonJavaClass):
+        __javainterfaces__ = ['android/speech/RecognitionListener']
+
+        def __init__(self):
+            super().__init__()
+
+        @java_method('(Landroid/os/Bundle;)V')
+        def onReadyForSpeech(self, params): pass
+
+        @java_method('()V')
+        def onBeginningOfSpeech(self): pass
+
+        @java_method('(F)V')
+        def onRmsChanged(self, rmsdB): pass
+
+        @java_method('([B)V')
+        def onBufferReceived(self, buffer): pass
+
+        @java_method('()V')
+        def onEndOfSpeech(self): pass
+
+        @java_method('(I)V')
+        def onError(self, error):
+            global speech_event
+            speech_event.set()
+
+        @java_method('(Landroid/os/Bundle;)V')
+        def onResults(self, results):
+            global speech_text, speech_event
+            matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            if matches and matches.size() > 0:
+                speech_text = matches.get(0)
+            speech_event.set()
+
+        @java_method('(Landroid/os/Bundle;)V')
+        def onPartialResults(self, partialResults): pass
+
+        @java_method('(ILandroid/os/Bundle;)V')
+        def onEvent(self, eventType, params): pass
+
+    speech_listener = SpeechListener()
+
+    def get_user_speech(timeout=5):
+        global speech_text, speech_event
+        speech_text = None
+        speech_event.clear()
+
+        @run_on_ui_thread
+        def start_recognition():
+            if not hasattr(get_user_speech, 'recognizer'):
+                get_user_speech.recognizer = SpeechRecognizer.createSpeechRecognizer(PythonActivity.mActivity)
+                get_user_speech.recognizer.setRecognitionListener(speech_listener)
+            
+            intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toString())
+            get_user_speech.recognizer.startListening(intent)
+
+        start_recognition()
+        speech_event.wait() # Blocking wait to keep the AI Loop synchronous
+        return speech_text if speech_text else ""
+
 else:
-    # Desktop mockup for TTS
+    # Desktop mockups
     def speak_text(text):
         print(f"[JARVIS SPEAKS]: {text}")
 
-# Polyfill for Speech to Text
-def get_user_speech(timeout=5):
-    # This is a complex feature on Android. Without PyAudio, the standard way
-    # is via Android intents or the kivy-android-speech module.
-    # For this template, we simulate continuous wake word listening on desktop,
-    # and provide the structural hook for Android STT.
-    if platform == 'android':
-        from jnius import autoclass
-        # A fully robust background STT requires an Android Service, which buildozer 
-        # supports, but is beyond a single script. Here we mock it so the UI works.
-        # Normally you would launch RecognizerIntent here.
-        time.sleep(2)
-        return "" # Idle wait
-    else:
-        # Mocking for desktop build
-        time.sleep(5) # Simulate listening
+    def get_user_speech(timeout=5):
+        time.sleep(3)
         return ""
 
 
@@ -159,28 +230,74 @@ class JarvisAndroid(FloatLayout):
         self.add_widget(self.status_lbl)
 
         # Transparent Chat Panel
-        self.chat_log = TransparentChatLog(size_hint=(0.9, 0.4), pos_hint={'center_x': 0.5, 'y': 0.05})
+        self.chat_log = TransparentChatLog(size_hint=(0.9, 0.33), pos_hint={'center_x': 0.5, 'y': 0.1})
         self.add_widget(self.chat_log)
 
-        self.chat_log.add_message("SYSTEM", "Android HUD Initialized. Awaiting wake word / command.")
+        self.chat_log.add_message("SYSTEM", "Android HUD Initialized. Press START to listen.")
+
+        # Control Buttons
+        from kivy.uix.button import Button
+        btn_layout = BoxLayout(size_hint=(0.9, 0.08), pos_hint={'center_x': 0.5, 'y': 0.01}, spacing=10)
+        
+        self.btn_start = Button(text="START JARVIS", background_color=(0, 0.8, 0.2, 1), bold=True)
+        self.btn_start.bind(on_release=self.start_jarvis)
+        
+        self.btn_stop = Button(text="STOP JARVIS", background_color=(0.8, 0, 0, 1), bold=True)
+        self.btn_stop.bind(on_release=self.stop_jarvis)
+        
+        btn_layout.add_widget(self.btn_start)
+        btn_layout.add_widget(self.btn_stop)
+        self.add_widget(btn_layout)
 
         # AI Threading Control
-        self.ai_running = True
+        self.ai_running = False
         self.ai_thread = threading.Thread(target=self.ai_loop)
         self.ai_thread.daemon = True
-        self.ai_thread.start()
 
     def update_bg(self, *args):
         self.bg_rect.pos = self.pos
         self.bg_rect.size = self.size
 
     def log_ui(self, sender, text):
-        # Schedule UI update on main Kivy thread
         Clock.schedule_once(lambda dt: self.chat_log.add_message(sender, text))
 
     def set_emotion(self, emotion):
         Clock.schedule_once(lambda dt: setattr(self.ring, 'emotion', emotion))
         Clock.schedule_once(lambda dt: setattr(self.status_lbl, 'text', f"[b]SYSTEM {emotion.upper()}[/b]"))
+
+    def start_jarvis(self, instance):
+        if self.ai_running: return
+        self.ai_running = True
+        
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                context = autoclass('org.kivy.android.PythonActivity').mActivity
+                service_class = autoclass('org.test.jarvishud.ServiceJarvisbackground')
+                intent = autoclass('android.content.Intent')(context, service_class)
+                intent.putExtra("pythonServiceArgument", "")
+                context.startService(intent)
+            except Exception as e:
+                self.log_ui("SYSTEM", f"Notification Service error: {e}")
+
+        if not self.ai_thread.is_alive():
+            self.ai_thread = threading.Thread(target=self.ai_loop)
+            self.ai_thread.daemon = True
+            self.ai_thread.start()
+        self.log_ui("SYSTEM", "AI Loop and Service Started.")
+
+    def stop_jarvis(self, instance):
+        self.ai_running = False
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                context = autoclass('org.kivy.android.PythonActivity').mActivity
+                service_class = autoclass('org.test.jarvishud.ServiceJarvisbackground')
+                intent = autoclass('android.content.Intent')(context, service_class)
+                context.stopService(intent)
+            except Exception as e:
+                pass
+        self.log_ui("SYSTEM", "AI Loop and Service Stopped.")
 
     def ai_loop(self):
         # Continuous listening loop replacing PyQt thread loop
